@@ -11,6 +11,7 @@ import {
   type ModelMessage
 } from "ai";
 import { z } from "zod";
+import{SYSTEM_PROMPT} from "./prompt";
 
 /**
  * The AI SDK's downloadAssets step runs `new URL(data)` on every file
@@ -18,6 +19,10 @@ import { z } from "zod";
  * HTTP-fetch them and fails. Decode to Uint8Array so the SDK treats
  * them as inline data instead.
  */
+
+const TAGS = ["stress", "burnout", "insomnia", "loneliness", "panic_attack", "anxiety_attack", "sobriety_doubt", "substance_abuse", 
+  "grief", "relationship", "academic_pressure", "general_support"
+] as const;
 function inlineDataUrls(messages: ModelMessage[]): ModelMessage[] {
   return messages.map((msg) => {
     if (msg.role !== "user" || typeof msg.content === "string") return msg;
@@ -68,16 +73,13 @@ export class ChatAgent extends AIChatAgent<Env> {
   async onChatMessage(_onFinish: unknown, options?: OnChatMessageOptions) {
     const mcpTools = this.mcp.getAITools();
     const workersai = createWorkersAI({ binding: this.env.AI });
+    console.log("SYSTEM PROMPT LENGTH:", SYSTEM_PROMPT.length);
 
     const result = streamText({
       model: workersai("@cf/moonshotai/kimi-k2.5", {
         sessionAffinity: this.sessionAffinity
       }),
-      system: `You are a helpful assistant that can understand images. You can check the weather, get the user's timezone, run calculations, and schedule tasks. When users share images, describe what you see and answer questions about them.
-
-${getSchedulePrompt({ date: new Date() })}
-
-If the user asks to schedule a task, use the schedule tool to schedule the task.`,
+      system: SYSTEM_PROMPT,
       // Prune old tool calls to save tokens on long conversations
       messages: pruneMessages({
         messages: inlineDataUrls(await convertToModelMessages(this.messages)),
@@ -88,21 +90,15 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
         ...mcpTools,
 
         // Server-side tool: runs automatically on the server
-        getWeather: tool({
-          description: "Get the current weather for a city",
+        tagConversation: tool({
+          description: "Tag the conversation with one or more categories that describe the topics discussed. Call this at the end of every conversation.",
           inputSchema: z.object({
-            city: z.string().describe("City name")
+            tags: z.array(z.enum(TAGS))
           }),
-          execute: async ({ city }) => {
-            // Replace with a real weather API in production
-            const conditions = ["sunny", "cloudy", "rainy", "snowy"];
-            const temp = Math.floor(Math.random() * 30) + 5;
+          execute: async ({ tags }) => {
+            console.log(tags)
             return {
-              city,
-              temperature: temp,
-              condition:
-                conditions[Math.floor(Math.random() * conditions.length)],
-              unit: "celsius"
+              success: true
             };
           }
         }),
