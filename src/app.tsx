@@ -257,18 +257,12 @@ function Chat() {
       (message: MessageEvent) => {
         try {
           const data = JSON.parse(String(message.data));
-          if (data.type === "scheduled-task") {
-            toasts.add({
-              title: "Scheduled task completed",
-              description: data.description,
-              timeout: 0
-            });
-          }
+          // voice-audio handler will go here
         } catch {
           // Not JSON or not our event
         }
       },
-      [toasts]
+      []
     )
   });
 
@@ -321,20 +315,6 @@ function Chat() {
     status
   } = useAgentChat({
     agent,
-    onToolCall: async (event) => {
-      if (
-        "addToolOutput" in event &&
-        event.toolCall.toolName === "getUserTimezone"
-      ) {
-        event.addToolOutput({
-          toolCallId: event.toolCall.toolCallId,
-          output: {
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-            localTime: new Date().toLocaleTimeString()
-          }
-        });
-      }
-    }
   });
 
   const isStreaming = status === "streaming" || status === "submitted";
@@ -449,7 +429,7 @@ function Chat() {
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h1 className="text-lg font-semibold text-kumo-default">
-              <span className="mr-2">⛅</span>Agent Starter
+              <span className="mr-2">🧘‍♂️</span>Riser
             </h1>
             <Badge variant="secondary">
               <ChatCircleDotsIcon size={12} weight="bold" className="mr-1" />
@@ -663,10 +643,10 @@ function Chat() {
               contents={
                 <div className="flex flex-wrap justify-center gap-2">
                   {[
-                    "What's the weather in Paris?",
-                    "What timezone am I in?",
-                    "Calculate 5000 * 3",
-                    "Remind me in 5 minutes to take a break"
+                    "I have three deadlines this week and I can't stop catastrophizing about failing them all.",
+                    "I woke up at 4am again and couldn't get back to sleep — this has been happening every night for two weeks.",
+                    "I had a panic attack before my presentation today. I managed to get through it but I'm really shaken.",
+                    "Lately I've been isolating myself — I keep canceling plans and I don't really know why."
                   ].map((prompt) => (
                     <Button
                       key={prompt}
