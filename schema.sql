@@ -26,7 +26,8 @@ CREATE TABLE profile (
 
 CREATE TABLE client (
     user_id          INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    motivation_level TEXT CHECK(motivation_level IN ('Low', 'Medium', 'High'))
+    motivation_level TEXT CHECK(motivation_level IN ('Low', 'Medium', 'High')), 
+    plan_type        TEXT CHECK(plan_type IN ('Free', 'Premium'))
 );
 
 CREATE TABLE psychologist (
@@ -64,7 +65,8 @@ CREATE TABLE care_plan (
 CREATE TABLE appointment (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     psychologist_id INTEGER NOT NULL REFERENCES psychologist(id) ON DELETE CASCADE,
-    client_id       INTEGER NOT NULL REFERENCES client(user_id) ON DELETE CASCADE,
+    client_id       INTEGER REFERENCES client(user_id) ON DELETE CASCADE,
+    availability_id INTEGER REFERENCES psychologist_availability(id) ON DELETE SET NULL,
     session_type    TEXT    NOT NULL DEFAULT 'Individual'
                     CHECK(session_type IN ('Individual', 'Group')),
     title           TEXT    NOT NULL,
@@ -74,7 +76,7 @@ CREATE TABLE appointment (
     zoom_link       TEXT,
     category_id     INTEGER REFERENCES category(id) ON DELETE SET NULL,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-    status TEXT NOT NULL DEFAULT 'confirmed' CHECK(status IN ('confirmed', 'cancelled', 'pending'))
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('confirmed', 'cancelled', 'pending', 'had'))
 
 );
 
@@ -85,12 +87,19 @@ CREATE TABLE appointment_participant (  -- only used for Group type
     UNIQUE(appointment_id, client_id)
 );
 
+CREATE TABLE psychologist_schedule (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    psychologist_id INTEGER NOT NULL REFERENCES psychologist(id) ON DELETE CASCADE,
+    day_of_week     INTEGER NOT NULL CHECK(day_of_week BETWEEN 0 AND 6),
+    start_time      TEXT NOT NULL,
+    end_time        TEXT NOT NULL,
+    slot_duration   REAL NOT NULL DEFAULT 45 CHECK(slot_duration >= 45 AND slot_duration <= 90)
+);
+
 CREATE TABLE psychologist_availability (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    psychologist    INTEGER NOT NULL REFERENCES psychologist(id) ON DELETE CASCADE,
-    available_from  TEXT NOT NULL,
-    available_until TEXT NOT NULL,
-    slot_duration   REAL CHECK(slot_duration >= 45 AND slot_duration <= 90) NOT NULL DEFAULT 45,
+    psychologist_id INTEGER NOT NULL REFERENCES psychologist(id) ON DELETE CASCADE,
+    slot            INTEGER NOT NULL REFERENCES psychologist_schedule(id) ON DELETE CASCADE,
     slot_price      INTEGER,
     is_booked       INTEGER NOT NULL DEFAULT 0
 );

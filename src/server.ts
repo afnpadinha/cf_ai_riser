@@ -1,6 +1,5 @@
 import { createWorkersAI } from "workers-ai-provider";
 import { callable, routeAgentRequest, type Schedule } from "agents";
-import { getSchedulePrompt, scheduleSchema } from "agents/schedule";
 import { AIChatAgent, type OnChatMessageOptions } from "@cloudflare/ai-chat";
 import {
   convertToModelMessages,
@@ -22,7 +21,35 @@ import{SYSTEM_PROMPT} from "./prompt";
 
 const TAGS = ["stress", "burnout", "insomnia", "loneliness", "panic_attack", "anxiety_attack", "sobriety_doubt", "substance_abuse", 
   "grief", "relationship", "academic_pressure", "general_support"
-] as const;
+] as const
+
+type SessionRow = {
+  tag: string
+  started_at: string
+  ended_at: string
+  summary: string
+}
+type SessionEntry = Omit<SessionRow, "tag">
+
+type AppointmentsRow = {
+  shrink_name: string
+  type: string
+  category: string
+  schedule_at: string
+}
+type AppointmentsEntry = Omit<AppointmentsRow, "type">
+
+type ExercisesRow = {
+  exercise_name: string
+  context_tag: string
+  outcome: string
+}
+
+type ExercisesOutcome = {
+  helped: string[]
+  didnt_help: string[]
+}
+
 function inlineDataUrls(messages: ModelMessage[]): ModelMessage[] {
   return messages.map((msg) => {
     if (msg.role !== "user" || typeof msg.content === "string") return msg;
@@ -35,45 +62,51 @@ function inlineDataUrls(messages: ModelMessage[]): ModelMessage[] {
         const bytes = Uint8Array.from(atob(match[2]), (c) => c.charCodeAt(0));
         return { ...part, data: bytes, mediaType: match[1] };
       })
-    };
-  });
+    }
+  })
 }
 
 export class ChatAgent extends AIChatAgent<Env> {
-  maxPersistedMessages = 100;
+  maxPersistedMessages = 100
+  userId!: number;
+  agentId!: number;
 
-  onStart() {
-    // Configure OAuth popup behavior for MCP servers that require authentication
+  async onStart() {
+    this.userId = 1;
+    const result = await this.env.DB.prepare(`
+      INSERT INTO agent_session (user_id) VALUES (?)
+    `).bind(this.userId).run()
+    this.agentId= result.meta.last_row_id ?? 0
     this.mcp.configureOAuthCallback({
       customHandler: (result) => {
         if (result.authSuccess) {
           return new Response("<script>window.close();</script>", {
             headers: { "content-type": "text/html" },
             status: 200
-          });
+          })
         }
         return new Response(
           `Authentication Failed: ${result.authError || "Unknown error"}`,
           { headers: { "content-type": "text/plain" }, status: 400 }
-        );
+        )
       }
-    });
+    })
   }
 
   @callable()
   async addServer(name: string, url: string) {
-    return await this.addMcpServer(name, url);
+    return await this.addMcpServer(name, url)
   }
 
   @callable()
   async removeServer(serverId: string) {
-    await this.removeMcpServer(serverId);
+    await this.removeMcpServer(serverId)
   }
 
   async onChatMessage(_onFinish: unknown, options?: OnChatMessageOptions) {
-    const mcpTools = this.mcp.getAITools();
-    const workersai = createWorkersAI({ binding: this.env.AI });
-    console.log("SYSTEM PROMPT LENGTH:", SYSTEM_PROMPT.length);
+    const mcpTools = this.mcp.getAITools()
+    const workersai = createWorkersAI({ binding: this.env.AI })
+    console.log("SYSTEM PROMPT LENGTH:", SYSTEM_PROMPT.length)
 
     const result = streamText({
       model: workersai("@cf/moonshotai/kimi-k2.5", {
@@ -99,122 +132,277 @@ export class ChatAgent extends AIChatAgent<Env> {
             console.log(tags)
             return {
               success: true
-            };
+            }
           }
         }),
 
-        // Client-side tool: no execute function — the browser handles it
-        getUserTimezone: tool({
+        getUserDetails: tool({
           description:
-            "Get the user's timezone from their browser. Use this when you need to know the user's local time.",
-          inputSchema: z.object({})
+            "Get the user's name, care plan, voice preference, past conversation tags, exercise history with outcomes per tag, and any pending feedback from the last session.",
+          inputSchema: z.object({}),
+          execute: async({}) =>{
+            const user = await this.env.DB.prepare(`
+              SELECT u.username, u.full_name, p.birthday, p.gender, p.user_location, c.motivation_level, c.plan_type
+              FROM users u
+              LEFT JOIN profile p ON p.user_id = u.id
+              LEFT JOIN client c ON c.user_id = u.id
+              WHERE u.id = ?
+              `
+            ).bind(this.userId).first()
+            const careplan = await this.env.DB.prepare(`
+              SELECT * FROM care_plan WHERE client_id = ?
+            `).bind(this.userId).first()
+            const session = await this.env.DB.prepare(`
+              SELECT sesh.summary, st.tag
+              FROM agent_session sesh
+              LEFT JOIN session_tag st ON st.agent_session_id = sesh.id
+              WHERE sesh.user_id = ?
+            `).bind(this.userId).all()
+            const feedback = await this.env.DB.prepare(`
+              SELECT exercise_name, outcome
+              FROM exercise_feedback 
+              WHERE user_id = ?
+              `
+            ).bind(this.userId).all()
+
+            return {
+              user: user,
+              carePlan: careplan,
+              recentTags: session.results,
+              exerciseHistory: feedback.results
+            }
+          }
         }),
 
         // Approval tool: requires user confirmation before executing
-        calculate: tool({
+        getConversationHistory: tool({
           description:
-            "Perform a math calculation with two numbers. Requires user approval for large numbers.",
-          inputSchema: z.object({
-            a: z.number().describe("First number"),
-            b: z.number().describe("Second number"),
-            operator: z
-              .enum(["+", "-", "*", "/", "%"])
-              .describe("Arithmetic operator")
-          }),
-          needsApproval: async ({ a, b }) =>
-            Math.abs(a) > 1000 || Math.abs(b) > 1000,
-          execute: async ({ a, b, operator }) => {
-            const ops: Record<string, (x: number, y: number) => number> = {
-              "+": (x, y) => x + y,
-              "-": (x, y) => x - y,
-              "*": (x, y) => x * y,
-              "/": (x, y) => x / y,
-              "%": (x, y) => x % y
-            };
-            if (operator === "/" && b === 0) {
-              return { error: "Division by zero" };
-            }
-            return {
-              expression: `${a} ${operator} ${b}`,
-              result: ops[operator](a, b)
-            };
-          }
-        }),
-
-        scheduleTask: tool({
-          description:
-            "Schedule a task to be executed at a later time. Use this when the user asks to be reminded or wants something done later.",
-          inputSchema: scheduleSchema,
-          execute: async ({ when, description }) => {
-            if (when.type === "no-schedule") {
-              return "Not a valid schedule input";
-            }
-            const input =
-              when.type === "scheduled"
-                ? when.date
-                : when.type === "delayed"
-                  ? when.delayInSeconds
-                  : when.type === "cron"
-                    ? when.cron
-                    : null;
-            if (!input) return "Invalid schedule type";
-            try {
-              this.schedule(input, "executeTask", description, {
-                idempotent: true
-              });
-              return `Task scheduled: "${description}" (${when.type}: ${input})`;
-            } catch (error) {
-              return `Error scheduling task: ${error}`;
+            "Get the user's conversation history for pattern detection",
+          inputSchema: z.object({}),
+          execute: async({}) =>{
+            const history = await this.env.DB.prepare(`
+              SELECT st.tag, sess.started_at, sess.ended_at, sess.summary
+              FROM session_tag st
+              JOIN agent_session sess ON sess.id = st.agent_session_id
+              WHERE sess.user_id = ?
+              ORDER BY st.tag, sess.started_at ASC
+              `).bind(this.userId).all()
+            const grouped = (history.results as SessionRow[]).reduce((accumulator, currentItem) => {
+              const key: SessionEntry = {
+                started_at : currentItem.started_at,
+                ended_at : currentItem.ended_at,
+                summary : currentItem.summary
+              }
+              if(!accumulator[currentItem.tag]){
+                accumulator[currentItem.tag] = []
+              } 
+              accumulator[currentItem.tag].push(key)
+              return accumulator
+            }, {} as Record<string, SessionEntry[]>)
+            return{
+              grouped
             }
           }
         }),
 
-        getScheduledTasks: tool({
-          description: "List all tasks that have been scheduled",
+        getAppointments: tool({
+          description:
+            "Get the user's upcoming confirmed and pending appointments. Call this at session start so the agent knows what is already booked.",
+            inputSchema: z.object({}),
+            execute:async({})=>{
+              const appointments = await this.env.DB.prepare(`
+                SELECT u.full_name AS shrink_name, ap.session_type AS type, c.name AS category, ap.scheduled_at AS schedule_at
+                FROM appointment ap
+                LEFT JOIN psychologist p ON  p.id = ap.psychologist_id
+                LEFT JOIN users u ON u.id = p.id
+                LEFT JOIN category c ON c.id = ap.category_id
+                WHERE ap.client_id = ? AND ap.status IN ('confirmed', 'pending') AND ap.scheduled_at >= datetime('now') 
+                ORDER BY ap.scheduled_at ASC
+              `).bind(this.userId).all()
+              const grouped = (appointments.results as AppointmentsRow[]).reduce((accumulator, currentItem) => {
+                const key: AppointmentsEntry = {
+                  shrink_name : currentItem.shrink_name,
+                  category : currentItem.category,
+                  schedule_at : currentItem.schedule_at
+                }
+                if(!accumulator[currentItem.type]){
+                  accumulator[currentItem.type] = []
+                } 
+                accumulator[currentItem.type].push(key)
+                return accumulator
+
+              }, {} as Record<string, AppointmentsEntry[]>)
+              return {
+                grouped
+              }
+            }
+        }),
+
+        getCategories: tool({
+          description: "Get all the available categories and specializations",
           inputSchema: z.object({}),
           execute: async () => {
-            const tasks = this.getSchedules();
-            return tasks.length > 0 ? tasks : "No scheduled tasks found.";
+            const categories = await this.env.DB.prepare(`
+              SELECT id, name
+              FROM category
+            `).all()
+            const specializations = await this.env.DB.prepare(`
+              SELECT id, specialization
+              FROM psychologist
+            `).all()
+            return {
+              categories : categories.results,
+              specializations : specializations.results
+            }
           }
         }),
 
-        cancelScheduledTask: tool({
-          description: "Cancel a scheduled task by its ID",
+        getAvailability: tool({
+          description: "Get all the available sessions for the users preference and availability",
           inputSchema: z.object({
-            taskId: z.string().describe("The ID of the task to cancel")
+            session_type: z.enum(["Individual", "Group"]), 
+            category_id: z.number().int().optional(),
+            specialization: z.string().optional(),
+            psychologist_id: z.number().int().optional(),
           }),
-          execute: async ({ taskId }) => {
-            try {
-              this.cancelSchedule(taskId);
-              return `Task ${taskId} cancelled.`;
-            } catch (error) {
-              return `Error cancelling task: ${error}`;
+          execute: async ({session_type, category_id, specialization, psychologist_id}) => {
+            if (session_type === "Group"){
+              const session = await this.env.DB.prepare(`
+                SELECT id, title, scheduled_at, duration_min
+                FROM appointment
+                WHERE status IN ('confirmed') AND scheduled_at >= datetime('now') AND category_id = ?
+              `).bind(category_id).all()
+              return {
+                sessions: session.results
+              }
             }
+            else{
+              const psychologist = await this.env.DB.prepare(`
+                SELECT p.id, u.full_name, p.rating_avg
+                FROM psychologist p
+                JOIN users u ON u.id = p.id
+                WHERE specialization = ?
+              `).bind(specialization).all()
+              if(psychologist_id != null){
+                const session = await this.env.DB.prepare(`
+                  SELECT sc.day_of_week, sc.start_time, sc.end_time, sc.slot_duration, av.slot_price
+                  FROM psychologist_availability av
+                  JOIN psychologist_schedule sc ON sc.id = av.slot
+                  WHERE av.is_booked = 0 AND av.psychologist_id = ?
+                `).bind(psychologist_id).first()
+                return {
+                  sessions: session,
+                  psychologist_id
+                }
+              }
+              return {
+                psychologists: psychologist.results
+              } 
+            }
+          }
+        }),
+
+        bookAppointment: tool({
+          description: "Book an appointment for the user when the topic is becoming to dense and out of your reach to help",
+          inputSchema: z.object({
+            session_type: z.enum(["Individual", "Group"]),
+            session_id: z.number().int().optional(),
+            psychologist_id: z.number().int().optional(),
+            availability_id: z.number().int().optional(),
+            title: z.string().optional(),
+            scheduled_at: z.string().optional(),
+            duration_min: z.number().int().optional(),
+          }),
+          needsApproval: async() => true,
+          execute: async ({session_type, session_id, psychologist_id, availability_id, scheduled_at, duration_min, title}) => {
+            if(session_type === "Group"){
+              await this.env.DB.prepare(`
+                INSERT INTO appointment_participant (appointment_id, client_id) VALUES (?, ?)
+              `).bind(session_id, this.userId).run()
+            } else {
+              await this.env.DB.prepare(`
+                INSERT INTO appointment (psychologist_id, client_id, availability_id, session_type, title, scheduled_at, duration_min, status) VALUES (?, ?,?, ?, ?, ?, ?, 'pending')
+              `).bind(psychologist_id, this.userId, availability_id, session_type, title, scheduled_at, duration_min).run()
+              await this.env.DB.prepare(`
+                UPDATE psychologist_availability SET is_booked = 1
+                WHERE id = ?
+              `).bind(availability_id).run()
+            }
+            return { success: true, session_type }
+          }
+        }),
+
+        getExerciseFeedback: tool({
+          description: "Get the user's feedback for already executed exercises ",
+          inputSchema: z.object({}),
+          execute: async () => {
+            const pending = await this.env.DB.prepare(`
+              SELECT e.id, e.exercise_name, sess.summary
+              FROM exercise_feedback e
+              JOIN agent_session sess ON e.agent_session_id = sess.id
+              WHERE e.user_id = ? AND e.outcome = 'pending'
+            `).bind(this.userId).all()
+            const exercises = await this.env.DB.prepare(`
+              SELECT exercise_name, context_tag, outcome
+              FROM exercise_feedback
+              WHERE user_id = ? AND outcome IN ('helped', 'didnt_help')
+            `).bind(this.userId).all()
+            const group = (exercises.results as ExercisesRow[]).reduce((accumulator, currentItem) => {
+              if(!accumulator[currentItem.context_tag]){
+                accumulator[currentItem.context_tag] = {
+                  helped: [],
+                  didnt_help: []
+                }
+              }
+              accumulator[currentItem.context_tag][currentItem.outcome as keyof ExercisesOutcome].push(currentItem.exercise_name)
+              return accumulator
+            }, {} as Record<string, ExercisesOutcome>)
+            return {
+              exercises:group,
+              pending: pending.results
+            }
+          }
+        }),
+
+        logExerciseFeedback: tool({
+          description: "Log the user's feedback for pending executed exercises ",
+          inputSchema: z.object({
+            exercise_feedback: z.enum(["pending", "helped", "didnt_help"]),
+            exercise_name: z.string().optional(),
+            exercise_id: z.number().int().optional(),
+            context_tag: z.string().optional()
+          }),
+          execute: async ({exercise_feedback, exercise_name, exercise_id, context_tag}) => {
+            if(exercise_feedback != "pending" && exercise_id != null){
+              await this.env.DB.prepare(`
+                UPDATE exercise_feedback SET outcome=?
+                WHERE id = ?
+              `).bind(exercise_feedback, exercise_id).run()
+            } else if(exercise_id === null){
+              await this.env.DB.prepare(`
+                INSERT INTO exercise_feedback  (user_id, agent_session_id, exercise_name, context_tag, outcome) VALUES (?, ?, ?, ?, ?)
+              `).bind(this.userId, this.agentId, exercise_name, context_tag, exercise_feedback).run()
+            }
+          return { success: true, exercise_feedback }
+          }
+        }),
+
+        escalate: tool({
+          description: "Escalate to a human counsellor when the user shows signs of crisis, suicidal ideation, severe trauma, or anything beyond safe AI support. This flags the session for urgent human review.",
+          inputSchema: z.object({
+            context: z.string()
+          }),
+          execute: async ({context}) => {
+          await this.env.DB.prepare(`
+            INSERT INTO escalation  (user_id, agent_session_id, context, is_urgent) VALUES (?, ?, ?, 1)
+          `).bind(this.userId, this.agentId, context).run()
+          return { success: true, context }
           }
         })
       },
-      stopWhen: stepCountIs(5),
-      abortSignal: options?.abortSignal
     });
 
     return result.toUIMessageStreamResponse();
-  }
-
-  async executeTask(description: string, _task: Schedule<string>) {
-    // Do the actual work here (send email, call API, etc.)
-    console.log(`Executing scheduled task: ${description}`);
-
-    // Notify connected clients via a broadcast event.
-    // We use broadcast() instead of saveMessages() to avoid injecting
-    // into chat history — that would cause the AI to see the notification
-    // as new context and potentially loop.
-    this.broadcast(
-      JSON.stringify({
-        type: "scheduled-task",
-        description,
-        timestamp: new Date().toISOString()
-      })
-    );
   }
 }
 
