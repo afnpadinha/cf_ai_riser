@@ -934,4 +934,4 @@ Nothing fancy. Go write it.
 
 </details>
 
-</details>
+</details>.
