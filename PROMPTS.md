@@ -935,3 +935,12 @@ Nothing fancy. Go write it.
 </details>
 
 </details>.
+<details>
+<summary>Model Performance and Selection</summary>
+
+<details>
+<summary>Me</summary>
+
+### Me
+>I changed the model to this one deepseek-ai/deepseek-r1-distill-qwen-32b supposadly is a very kind AI but when asked "Who are you?" it answered me this 
+"Okay
