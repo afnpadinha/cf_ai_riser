@@ -12,17 +12,14 @@ import {
 import { z } from "zod";
 import{SYSTEM_PROMPT} from "./prompt";
 
-/**
- * The AI SDK's downloadAssets step runs `new URL(data)` on every file
- * part's string data. Data URIs parse as valid URLs, so it tries to
- * HTTP-fetch them and fails. Decode to Uint8Array so the SDK treats
- * them as inline data instead.
- */
 
+
+// Valid conversation tags for pattern detection and session classification
 const TAGS = ["stress", "burnout", "insomnia", "loneliness", "panic_attack", "anxiety_attack", "sobriety_doubt", "substance_abuse", 
   "grief", "relationship", "academic_pressure", "general_support"
 ] as const
 
+// Types for D1 query results — used to cast raw DB rows before processing
 type SessionRow = {
   tag: string
   started_at: string
@@ -50,6 +47,13 @@ type ExercisesOutcome = {
   didnt_help: string[]
 }
 
+/**
+ * The AI SDK's downloadAssets step runs `new URL(data)` on every file
+ * part's string data. Data URIs parse as valid URLs, so it tries to
+ * HTTP-fetch them and fails. Decode to Uint8Array so the SDK treats
+ * them as inline data instead.
+ */
+
 function inlineDataUrls(messages: ModelMessage[]): ModelMessage[] {
   return messages.map((msg) => {
     if (msg.role !== "user" || typeof msg.content === "string") return msg;
@@ -66,11 +70,14 @@ function inlineDataUrls(messages: ModelMessage[]): ModelMessage[] {
   })
 }
 
+// Riser AI Agent — Durable Object that manages conversation state, DB access, and tool execution
 export class ChatAgent extends AIChatAgent<Env> {
   maxPersistedMessages = 100
   userId!: number;
   agentId!: number;
 
+  // Runs once when the agent starts — hardcoded userId for now (auth to be implemented)
+  // Creates a new agent_session row in the DB and stores the session ID for tool use
   async onStart() {
     this.userId = 1;
     const result = await this.env.DB.prepare(`
@@ -93,20 +100,22 @@ export class ChatAgent extends AIChatAgent<Env> {
     })
   }
 
+  //Adds server for the ai agent 
   @callable()
   async addServer(name: string, url: string) {
     return await this.addMcpServer(name, url)
   }
 
+  //Removes server for the ai agent 
   @callable()
   async removeServer(serverId: string) {
     await this.removeMcpServer(serverId)
   }
 
+  //Defines the system prompt, the ai model, when to prune messages and all the callabel tools
   async onChatMessage(_onFinish: unknown, options?: OnChatMessageOptions) {
     const mcpTools = this.mcp.getAITools()
     const workersai = createWorkersAI({ binding: this.env.AI })
-    console.log("SYSTEM PROMPT LENGTH:", SYSTEM_PROMPT.length)
 
     const result = streamText({
       model: workersai("@cf/moonshotai/kimi-k2.5", {
@@ -122,20 +131,45 @@ export class ChatAgent extends AIChatAgent<Env> {
         // MCP tools from connected servers
         ...mcpTools,
 
-        // Server-side tool: runs automatically on the server
+        // Tags the conversation with the user with one or more of the Tags defined above 
+        // It makes it easier to detect paterns
         tagConversation: tool({
           description: "Tag the conversation with one or more categories that describe the topics discussed. Call this at the end of every conversation.",
           inputSchema: z.object({
             tags: z.array(z.enum(TAGS))
           }),
           execute: async ({ tags }) => {
-            console.log(tags)
+              await Promise.all(tags.map(t=>
+                this.env.DB.prepare(`
+                INSERT INTO session_tag (agent_session_id, tag) VALUES (?, ?)
+                `).bind(this.agentId, t).run()
+              ))
             return {
               success: true
             }
           }
         }),
 
+
+        endsConversation: tool({
+          description: "End the session by saving a brief summary of what was discussed and the support provided. Call this after tagConversation. The summary should be 2-3 sentences covering the main topic, how the user was feeling, and what coping techniques were used if any.",
+          inputSchema: z.object({
+            tags: z.array(z.enum(TAGS))
+          }),
+          execute: async ({ tags }) => {
+              await Promise.all(tags.map(t=>
+                this.env.DB.prepare(`
+                INSERT INTO session_tag (agent_session_id, tag) VALUES (?, ?)
+                `).bind(this.agentId, t).run()
+              ))
+            return {
+              success: true
+            }
+          }
+        }),
+
+        // Gets user details inj the beginning of every conversation 
+        // for the agent to have context about the person he is speaking with
         getUserDetails: tool({
           description:
             "Get the user's name, care plan, voice preference, past conversation tags, exercise history with outcomes per tag, and any pending feedback from the last session.",
@@ -397,6 +431,38 @@ export class ChatAgent extends AIChatAgent<Env> {
             INSERT INTO escalation  (user_id, agent_session_id, context, is_urgent) VALUES (?, ?, ?, 1)
           `).bind(this.userId, this.agentId, context).run()
           return { success: true, context }
+          }
+        }),
+
+        //activates text-to-audio when the user is having a any type of problem that 
+        // would make him unconfurtable to write in the chat
+        activateVoice: tool({
+          description: "Activate voice mode when the user is experiencing acute distress — panic attacks, anxiety attacks, or any moment where they seem too overwhelmed to type. Takes the calming text to be spoken aloud and the user's preferred speaker voice.",
+          inputSchema: z.object({
+            text: z.string(),
+            voice: z.string(),
+          }),
+          execute: async ({text, voice}) => {
+            const audio = await this.env.AI.run("@cf/deepgram/aura-2-en", {
+              text: text,
+              speaker: voice as Ai_Cf_Deepgram_Aura_2_En_Input["speaker"], //trust me this is avalid string speaker
+              encoding: "mp3",
+              container: "none"
+            })
+            const encode = btoa(audio)
+            this.broadcast(JSON.stringify({ type: "voice-audio", audio: encode }))
+          return { success: true}
+          }
+        }),
+
+        //deactivates text-to-audio when the user is no longer having a any type of problem that 
+        // would make him unconfurtable to write in the chat
+        deactivateVoice: tool({
+          description: "Deactivate voice mode once the user has calmed down and is able to engage in text conversation again. Always a deliberate decision based on the conversation — never triggered automatically.",
+          inputSchema: z.object({}),
+          execute: async () => {
+            this.broadcast(JSON.stringify({ type: "voice-deactivate"}))
+            return { success: true}
           }
         })
       },

@@ -120,8 +120,7 @@ CREATE TABLE agent_session (
 CREATE TABLE session_tag (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_session_id INTEGER NOT NULL REFERENCES agent_session(id) ON DELETE CASCADE,
-    tag              TEXT    NOT NULL,   -- situational tag, e.g. 'grief', 'work-stress'
-    tagged_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+    tag              TEXT    NOT NULL   -- situational tag, e.g. 'grief', 'work-stress'
 );
 
 -- ============================================================
