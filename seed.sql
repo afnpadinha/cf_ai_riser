@@ -143,11 +143,11 @@ VALUES
 -- SESSION TAGS
 -- ============================================================
 
-INSERT INTO session_tag (agent_session_id, tag, tagged_at)
+INSERT INTO session_tag (agent_session_id, tag)
 VALUES
-    (1, 'anxiety_attack', '2026-04-10 20:38:00'),
-    (2, 'insomnia',       '2026-04-14 21:45:00'),
-    (2, 'stress',         '2026-04-14 21:45:00');
+    (1, 'anxiety_attack'),
+    (2, 'insomnia'),
+    (2, 'stress');
 
 -- ============================================================
 -- EXERCISE FEEDBACK

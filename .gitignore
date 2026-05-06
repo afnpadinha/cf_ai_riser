@@ -148,3 +148,4 @@ dist
 !.env.example
 
 .claude/worktrees/
+PROMPTS.md

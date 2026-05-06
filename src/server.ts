@@ -16,7 +16,7 @@ import{SYSTEM_PROMPT} from "./prompt";
 
 // Valid conversation tags for pattern detection and session classification
 const TAGS = ["stress", "burnout", "insomnia", "loneliness", "panic_attack", "anxiety_attack", "sobriety_doubt", "substance_abuse", 
-  "grief", "relationship", "academic_pressure", "general_support"
+  "grief", "relationship", "academic_pressure", "work_pressure", "general_support"
 ] as const
 
 // Types for D1 query results — used to cast raw DB rows before processing
@@ -176,7 +176,7 @@ export class ChatAgent extends AIChatAgent<Env> {
           inputSchema: z.object({}),
           execute: async({}) =>{
             const user = await this.env.DB.prepare(`
-              SELECT u.username, u.full_name, p.birthday, p.gender, p.user_location, c.motivation_level, c.plan_type
+              SELECT u.username, u.full_name, u.voice_id, p.birthday, p.gender, p.user_location, c.motivation_level, c.plan_type
               FROM users u
               LEFT JOIN profile p ON p.user_id = u.id
               LEFT JOIN client c ON c.user_id = u.id
