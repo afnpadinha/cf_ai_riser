@@ -6,6 +6,18 @@ Riser is an AI wellness companion built for the Cloudflare Software Engineer Int
 
 ---
 
+## What is Riser
+
+Mental health support is often inaccessible — appointments are expensive, waitlists are long, and most people don't reach out until things are already bad. Riser sits in the gap.
+
+It is an AI wellness companion, not a therapist. It checks in with you, remembers what you've shared across sessions, notices when the same topics keep coming up, and knows when to suggest professional help. It can guide you through breathing and grounding exercises, help you track how those exercises are working over time, and connect you with a licensed psychologist when you're ready.
+
+The goal is a companion that feels continuous — one that knows your history, adapts to your patterns, and is available whenever you need it, without replacing the human professionals who matter most.
+
+Riser was built as part of the Cloudflare Software Engineer Internship challenge, using Cloudflare Workers, Durable Objects, D1, and Workers AI as the core infrastructure.
+
+---
+
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) v18+
@@ -100,7 +112,72 @@ Wrangler starts a local dev server. Open [http://localhost:5173](http://localhos
 
 ---
 
+## Testing with Docker
+
+Docker handles Node, Wrangler, and the database setup for you. You only need Docker Desktop and a Cloudflare account.
+
+### Prerequisites
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop) installed and running
+- A Cloudflare account (free tier works)
+
+### Step 1 — Get your Cloudflare credentials
+
+**API Token:**
+1. Cloudflare Dashboard → My Profile → API Tokens → Create Token
+2. Use the "Edit Cloudflare Workers" template
+3. Under Account Resources → select your account
+4. Under Zone Resources → change to "All zones"
+5. Continue to summary → Create Token → **copy it immediately, it won't be shown again**
+
+**Account ID:**
+- Visible in the URL: `dash.cloudflare.com/<account-id>/...`
+- Or: Workers & Pages → right sidebar
+
+### Step 2 — Create your `.env` file
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and fill in both values:
+
+```
+CLOUDFLARE_API_TOKEN=your_token_here
+CLOUDFLARE_ACCOUNT_ID=your_account_id_here
+```
+
+### Step 3 — Build and start
+
+```bash
+docker compose up --build
+```
+
+This will apply the schema, seed the database, and start the dev server automatically.
+
+### Step 4 — Open the app
+
+Open [http://localhost:5173](http://localhost:5173) and follow the [Testing the App](#testing-the-app--step-by-step) section below.
+
+### Useful commands
+
+| Command | What it does |
+|---|---|
+| `docker compose up` | Start (no rebuild) |
+| `docker compose up --build` | Rebuild image and start |
+| `docker compose down` | Stop the container |
+| `docker compose down -v` | Stop and wipe the database |
+
+---
+
 ## Testing the App — Step by Step
+
+> **Disclaimer**
+> Speech-to-text is not yet implemented — the agent can speak to the user via voice, but capturing the user's voice and converting it back to text is not built yet. This will be ready in a couple of days.
+>
+> `PROMPTS.md` in this repo is not hand-written. It is generated automatically by an n8n workflow that captures each session, writes the prompt notes, and also logs what was learned into Obsidian.
+
+![n8n workflow](public/image.png)
 
 The app is hardcoded to `userId = 1` (Sara Oliveira) until auth is implemented. All interactions happen as Sara.
 
