@@ -241,6 +241,8 @@ function Chat() {
   const [mcpUrl, setMcpUrl] = useState("");
   const [isAddingServer, setIsAddingServer] = useState(false);
   const mcpPanelRef = useRef<HTMLDivElement>(null);
+  const [talking, setSpeach] = useState(false)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const agent = useAgent<ChatAgent>({
     agent: "ChatAgent",
@@ -257,12 +259,22 @@ function Chat() {
       (message: MessageEvent) => {
         try {
           const data = JSON.parse(String(message.data));
-          // voice-audio handler will go here
+          if(data.type ==="voice-audio"){
+            setSpeach(true)
+            const uri = "data:audio/mp3;base64," + data.audio
+            const audio = new Audio(uri)
+            audioRef.current = audio
+            audio.play()
+          } else if(data.type ==="voice-deactivate") {
+            setSpeach(false)
+            audioRef.current?.pause()
+            audioRef.current = null
+          }
         } catch {
           // Not JSON or not our event
         }
       },
-      []
+      [setSpeach]
     )
   });
 
@@ -447,6 +459,18 @@ function Chat() {
                 {connected ? "Connected" : "Disconnected"}
               </Text>
             </div>
+            {talking && (
+              <div className="flex items-center gap-1.5">
+                <CircleIcon
+                  size={8}
+                  weight="fill"
+                  className="text-kumo-brand animate-pulse"
+                />
+                <Text size="xs" variant="secondary">
+                  Voice active
+                </Text>
+              </div>
+            )}
             <div className="flex items-center gap-1.5">
               <BugIcon size={14} className="text-kumo-inactive" />
               <Switch

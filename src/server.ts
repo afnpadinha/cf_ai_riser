@@ -179,7 +179,8 @@ export class ChatAgent extends AIChatAgent<Env> {
               SELECT u.username, u.full_name, u.voice_id, p.birthday, p.gender, p.user_location, c.motivation_level, c.plan_type
               FROM users u
               LEFT JOIN profile p ON p.user_id = u.id
-              LEFT JOIN client c ON c.user_id = u.id
+              LEFT JOIN client c ON c.user_id = Its done 
+              u.id
               WHERE u.id = ?
               `
             ).bind(this.userId).first()
