@@ -8,7 +8,7 @@
 
 INSERT INTO users (id, username, full_name, email, preferred_language, status, voice_enabled, voice_id, created_at)
 VALUES
-    (1, 'sara.oliveira', 'Sara Oliveira',    'sara.oliveira@example.com', 'en', 'Active', 1, 'en-US-Jenny', '2026-01-10 09:00:00'),
+    (1, 'sara.oliveira', 'Sara Oliveira',    'sara.oliveira@example.com', 'en', 'Active', 1, 'luna', '2026-01-10 09:00:00'),
     (2, 'dr.james.miller', 'Dr. James Miller', 'james.miller@example.com', 'en', 'Active', 0, NULL,          '2026-01-08 08:00:00');
 
 -- ============================================================
