@@ -446,8 +446,7 @@ export class ChatAgent extends AIChatAgent<Env> {
             const audio = await this.env.AI.run("@cf/deepgram/aura-2-en", {
               text: text,
               speaker: voice as Ai_Cf_Deepgram_Aura_2_En_Input["speaker"], //trust me this is avalid string speaker
-              encoding: "mp3",
-              container: "none"
+              encoding: "mp3"
             })
             const encode = btoa(audio)
             this.broadcast(JSON.stringify({ type: "voice-audio", audio: encode }))
@@ -466,6 +465,7 @@ export class ChatAgent extends AIChatAgent<Env> {
           }
         })
       },
+      stopWhen: stepCountIs(10),
     });
 
     return result.toUIMessageStreamResponse();
