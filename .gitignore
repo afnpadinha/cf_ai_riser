@@ -149,3 +149,4 @@ dist
 
 .claude/worktrees/
 PROMPTS.md
+.env

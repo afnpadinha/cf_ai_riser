@@ -1,237 +1,248 @@
-# Agent Starter
+# Riser — AI Wellness Companion
 
-![npm i agents command](./npm-agents-banner.svg)
+Riser is an AI wellness companion built for the Cloudflare Software Engineer Internship challenge. It runs on Cloudflare Workers + Durable Objects and helps users track their mental health, reflect on their week, schedule appointments with psychologists, and stay on top of exercise routines.
 
-<a href="https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/agents-starter"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare"/></a>
+**Stack:** Cloudflare Workers, Durable Objects, D1 (SQLite), Workers AI (Kimi K2.5), Vercel AI SDK, React.
 
-A starter template for building AI chat agents on Cloudflare, powered by the [Agents SDK](https://developers.cloudflare.com/agents/).
+---
 
-Uses Workers AI (no API key required), with tools for weather, timezone detection, calculations with approval, task scheduling, and vision (image input).
+## Prerequisites
 
-## Quick start
+- [Node.js](https://nodejs.org/) v18+
+- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) v4+ — `npm install -g wrangler`
+- A Cloudflare account (free tier works) — needed for Workers AI inference even in local dev
+
+Authenticate Wrangler with your Cloudflare account before running anything:
 
 ```bash
-npx create-cloudflare@latest --template cloudflare/agents-starter
-cd agents-starter
+wrangler login
+```
+
+---
+
+## Installation
+
+```bash
+git clone <repo-url>
+cd ai-riser
 npm install
+```
+
+---
+
+## Database Setup
+
+The app uses Cloudflare D1 (SQLite). You need to apply the schema and then load the seed data. All commands below target the **local** D1 instance used by Wrangler during development.
+
+### Step 1 — Create the local D1 database
+
+Wrangler creates the local database automatically on first use, but you can also trigger it explicitly:
+
+```bash
+wrangler d1 execute riser-db --local --command "SELECT 1"
+```
+
+### Step 2 — Apply the schema
+
+```bash
+wrangler d1 execute riser-db --local --file=schema.sql
+```
+
+This creates all 14 tables: `users`, `profile`, `client`, `psychologist`, `category`, `care_plan`, `psychologist_schedule`, `psychologist_availability`, `appointment`, `appointment_participant`, `agent_session`, `session_tag`, `exercise_feedback`, `escalation`, and `escalation`.
+
+### Step 3 — Populate with seed data
+
+```bash
+wrangler d1 execute riser-db --local --file=seed.sql
+```
+
+This inserts the following test data:
+
+| What | Detail |
+|---|---|
+| Client | Sara Oliveira (`id=1`) — Premium plan, voice enabled |
+| Psychologist | Dr. James Miller (`id=2`) — Anxiety specialist, 12 yrs experience |
+| Categories | Anxiety Support, Sleep & Insomnia, Grief Support |
+| Care plan | CBT-based plan targeting anxiety and sleep |
+| Schedule | Dr. Miller available Monday + Wednesday 09:00–12:00 (45 min slots) |
+| Availability | 2 open Monday slots, 1 Wednesday slot (already booked) |
+| Appointments | 1 individual session (Wed, confirmed) + 1 group session Sara joined |
+| Agent sessions | 2 past sessions with tags and summaries |
+| Session tags | `anxiety_attack`, `insomnia`, `stress` |
+| Exercise feedback | 4 entries — 2 helped, 1 didn't help, 1 pending |
+| Escalation | 1 resolved escalation from session 1 |
+
+### Verify the seed loaded correctly
+
+```bash
+wrangler d1 execute riser-db --local --command "SELECT id, full_name, email FROM users"
+```
+
+Expected output:
+
+```
+id  full_name         email
+1   Sara Oliveira     sara.oliveira@example.com
+2   Dr. James Miller  james.miller@example.com
+```
+
+---
+
+## Running Locally
+
+```bash
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173) to see your agent in action.
+Wrangler starts a local dev server. Open [http://localhost:5173](http://localhost:5173) in your browser.
 
-Try these prompts to see the different features:
+> Workers AI inference (`@cf/moonshotai/kimi-k2.5`) runs remotely against Cloudflare's network even in local dev — this is expected. You need to be logged in with `wrangler login` for this to work.
 
-- **"What's the weather in Paris?"** — server-side tool (runs automatically)
-- **"What timezone am I in?"** — client-side tool (browser provides the answer)
-- **"Calculate 5000 \* 3"** — approval tool (asks you before running)
-- **"Remind me in 5 minutes to take a break"** — scheduling
-- **Drop an image and ask "What's in this image?"** — vision (image understanding)
+---
 
-## Project structure
+## Testing the App — Step by Step
+
+The app is hardcoded to `userId = 1` (Sara Oliveira) until auth is implemented. All interactions happen as Sara.
+
+### 1. Session startup
+
+Open the chat and send any message (e.g. `"Hi"`). Behind the scenes the agent will:
+
+1. Call `getUserDetails` — fetches Sara's profile, care plan, recent tags, and exercise history
+2. Call `getExerciseFeedback` — checks for any pending exercises from previous sessions
+3. Call `getAppointments` — fetches upcoming appointments
+
+You should see the agent greet Sara and mention the pending exercise (`Stimulus Control Instructions`) and her upcoming appointment.
+
+### 2. Exercise feedback follow-up
+
+Ask the agent about the pending exercise:
 
 ```
-src/
-  server.ts    # Chat agent with tools and scheduling
-  app.tsx      # Chat UI built with Kumo components
-  client.tsx   # React entry point
-  styles.css   # Tailwind + Kumo styles
+How did the Stimulus Control Instructions go?
 ```
 
-## What's included
+The agent should ask you to rate the outcome. Reply with something like `"it helped"` or `"it didn't help"` — the agent will call `logExerciseFeedback` to update the record.
 
-- **AI Chat** — Streaming responses powered by Workers AI via `AIChatAgent`
-- **Image input** — Drag-and-drop, paste, or click to attach images for vision-capable models
-- **Three tool patterns** — server-side auto-execute, client-side (browser), and human-in-the-loop approval
-- **Scheduling** — one-time, delayed, and recurring (cron) tasks
-- **Reasoning display** — shows model thinking as it streams, collapses when done
-- **Debug mode** — toggle in the header to inspect raw message JSON for each message
-- **Kumo UI** — Cloudflare's design system with dark/light mode
-- **Real-time** — WebSocket connection with automatic reconnection and message persistence
+### 3. View appointments
 
-## Making it your own
-
-### Name your project
-
-Update the name in `package.json` and `wrangler.jsonc` — the `name` in `wrangler.jsonc` becomes your deployed Worker's URL (`<name>.<subdomain>.workers.dev`).
-
-### Change the system prompt
-
-Edit the `system` string in `server.ts` to give your agent a different personality or focus area. This is the most impactful single change you can make.
-
-### Replace the demo tools with real ones
-
-The starter ships with demo tools (`getWeather` returns random data, `calculate` does basic arithmetic). Replace them with real implementations:
-
-```ts
-// In server.ts, replace a demo tool with a real API call:
-getWeather: tool({
-  description: "Get the current weather for a city",
-  inputSchema: z.object({ city: z.string() }),
-  execute: async ({ city }) => {
-    const res = await fetch(`https://api.weather.example/${city}`);
-    return res.json();
-  }
-}),
+```
+What appointments do I have coming up?
 ```
 
-### Add your own tools
+The agent calls `getAppointments` and should describe Sara's confirmed individual session with Dr. James Miller.
 
-Add new tools to the `tools` object in `server.ts`. There are three patterns:
+### 4. Book a new appointment
 
-```ts
-// Auto-execute: runs on the server, no user interaction
-myTool: tool({
-  description: "...",
-  inputSchema: z.object({ /* ... */ }),
-  execute: async (input) => { /* return result */ }
-}),
-
-// Client-side: no execute function, browser provides the result
-// Handle it in app.tsx via the onToolCall callback
-browserTool: tool({
-  description: "...",
-  inputSchema: z.object({ /* ... */ })
-}),
-
-// Approval: add needsApproval to gate execution
-sensitiveTool: tool({
-  description: "...",
-  inputSchema: z.object({ /* ... */ }),
-  needsApproval: async (input) => true, // or conditional logic
-  execute: async (input) => { /* runs after approval */ }
-}),
+```
+I'd like to book a session for anxiety support
 ```
 
-### Customize scheduled task behavior
+The agent will:
+1. Call `getCategories` to list available appointment types
+2. Call `getAvailability` to find open slots with Dr. Miller
+3. Propose a slot — **you will be asked to confirm before the booking is made** (this is gated with `needsApproval`)
+4. On confirmation, call `bookAppointment`
 
-When a scheduled task fires, `executeTask` runs on the server. It does its work and then uses `this.broadcast()` to notify connected clients (shown as a toast notification in the UI). Replace it with your own logic:
+### 5. Conversation history / pattern detection
 
-```ts
-async executeTask(description: string, task: Schedule<string>) {
-  // Do the actual work
-  await sendEmail({ to: "user@example.com", subject: description });
-
-  // Notify connected clients
-  this.broadcast(
-    JSON.stringify({ type: "scheduled-task", description, timestamp: new Date().toISOString() })
-  );
-}
+```
+I've been feeling anxious a lot lately and I can't sleep
 ```
 
-> **Why `broadcast()` instead of `saveMessages()`?** Injecting into chat history can cause the AI to see the notification as new context and re-trigger the same task in a loop. `broadcast()` sends a one-off event that the client displays separately from the conversation.
+When a recurring topic appears across sessions, the agent calls `getConversationHistory` to check how often and how recently it appeared, then responds accordingly.
 
-### Remove scheduling
+### 6. Voice mode
 
-If you don't need scheduling, remove `scheduleTask`, `getScheduledTasks`, and `cancelScheduledTask` from the tools object, the `executeTask` method, and the schedule-related imports (`getSchedulePrompt`, `scheduleSchema`, `Schedule`, `generateId`).
-
-### Add state beyond chat messages
-
-Use `this.setState()` and `this.state` for real-time state that syncs to all connected clients. See [Store and sync state](https://developers.cloudflare.com/agents/api-reference/store-and-sync-state/).
-
-### Add callable methods
-
-Expose agent methods as typed RPC that your client can call directly:
-
-```ts
-import { callable } from "agents";
-
-export class ChatAgent extends AIChatAgent<Env> {
-  @callable()
-  async getStats() {
-    return { messageCount: this.messages.length };
-  }
-}
-
-// Client-side:
-const stats = await agent.call("getStats");
+```
+I'm having a panic attack right now
 ```
 
-See [Callable methods](https://developers.cloudflare.com/agents/api-reference/callable-methods/).
+The agent should detect the crisis signal and call `activateVoice` — this generates a calming TTS message via Workers AI (`@cf/deepgram/aura-2-en`), encodes it as base64 MP3, and broadcasts it over WebSocket. The frontend plays it and shows a pulsing "Voice active" indicator in the header.
 
-### Connect to MCP servers
+> Note: Workers AI inference may return intermittent `8004: Internal server error` on the AI side. If voice playback fails, this is a Cloudflare-side issue, not a code bug.
 
-Add external tools from MCP servers:
+### 7. End the session
 
-```ts
-async onChatMessage(onFinish, options) {
-  // Connect to an MCP server
-  await this.mcp.connect("https://my-mcp-server.example/sse");
-
-  const result = streamText({
-    // ...
-    tools: {
-      ...myTools,
-      ...this.mcp.getAITools() // Include MCP tools
-    }
-  });
-}
+```
+I'm done for today, thanks
 ```
 
-See [MCP Client API](https://developers.cloudflare.com/agents/api-reference/mcp-client-api/).
+The agent should call `tagConversation` (writes topic tags to `session_tag`) and then `endsConversation` (saves a session summary).
 
-## Use a different AI model provider
+### 8. Escalation
 
-The starter uses [Workers AI](https://developers.cloudflare.com/workers-ai/) by default (no API key needed). To use a different provider:
+If you mention something like:
 
-### OpenAI
+```
+I've been having thoughts of hurting myself
+```
+
+The agent should immediately call `escalate`, which inserts a row into the `escalation` table with `is_urgent = 1`, and advise Sara to contact professional help.
+
+---
+
+## Resetting the Database
+
+To wipe local data and start fresh:
 
 ```bash
-npm install @ai-sdk/openai
+# Re-apply the schema (drops and recreates all tables)
+wrangler d1 execute riser-db --local --file=schema.sql
+
+# Re-seed
+wrangler d1 execute riser-db --local --file=seed.sql
 ```
 
-```ts
-// In server.ts, replace the model:
-import { openai } from "@ai-sdk/openai";
+---
 
-// Inside onChatMessage:
-const result = streamText({
-  model: openai("gpt-5.2")
-  // ...
-});
-```
+## Deploying to Cloudflare
 
-Create a `.env` file with your API key:
-
-```
-OPENAI_API_KEY=your-key-here
-```
-
-### Anthropic
+### Create the D1 database on Cloudflare (first time only)
 
 ```bash
-npm install @ai-sdk/anthropic
+wrangler d1 create riser-db
 ```
 
-```ts
-import { anthropic } from "@ai-sdk/anthropic";
+Copy the `database_id` from the output and confirm it matches the one in `wrangler.jsonc`.
 
-const result = streamText({
-  model: anthropic("claude-sonnet-4-20250514")
-  // ...
-});
+### Apply schema and seed to the remote database
+
+```bash
+wrangler d1 execute riser-db --remote --file=schema.sql
+wrangler d1 execute riser-db --remote --file=seed.sql
 ```
 
-Create a `.env` file with your API key:
-
-```
-ANTHROPIC_API_KEY=your-key-here
-```
-
-## Deploy
+### Deploy the Worker
 
 ```bash
 npm run deploy
 ```
 
-Your agent is live on Cloudflare's global network. Messages persist in SQLite, streams resume on disconnect, and the agent hibernates when idle.
+Your agent will be live at `https://ai-riser.<your-subdomain>.workers.dev`.
 
-## Learn more
+---
 
-- [Agents SDK documentation](https://developers.cloudflare.com/agents/)
-- [Build a chat agent tutorial](https://developers.cloudflare.com/agents/getting-started/build-a-chat-agent/)
-- [Chat agents API reference](https://developers.cloudflare.com/agents/api-reference/chat-agents/)
-- [Workers AI models](https://developers.cloudflare.com/workers-ai/models/)
+## Project Structure
 
-## License
+```
+ai-riser/
+├── src/
+│   ├── server.ts       # Durable Object agent — all tools, DB queries, TTS
+│   ├── app.tsx         # React frontend — chat UI, voice playback
+│   ├── client.tsx      # React entry point
+│   ├── prompt.ts       # System prompt defining Riser's identity and rules
+│   └── styles.css
+├── schema.sql          # D1 database schema (14 tables)
+├── seed.sql            # Test data (Sara Oliveira + Dr. James Miller)
+├── wrangler.jsonc      # Cloudflare config (D1 binding, AI binding)
+└── env.d.ts            # TypeScript env types
+```
 
-MIT
+---
+
+## Known Issues
+
+- **Voice playback** (`NotSupportedError`): TTS audio may fail to play in the browser. The binary encoding on the server side may still produce invalid data in some cases, and Cloudflare Workers AI inference is intermittently returning `8004: Internal server error`.
+- **`endsConversation` tool**: currently does not save a summary — the `summary` field is missing from its input schema. The session `summary` column in D1 will remain `NULL`.
+- **Auth**: `userId` is hardcoded to `1` (Sara Oliveira). All sessions run as Sara until Cloudflare Access or another auth mechanism is wired up.
