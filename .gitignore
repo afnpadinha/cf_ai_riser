@@ -148,5 +148,5 @@ dist
 !.env.example
 
 .claude/worktrees/
-PROMPTS.md
+CLAUDE.md
 .env
