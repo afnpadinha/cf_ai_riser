@@ -121,15 +121,16 @@ Rewritten this session. Now covers:
 ## Voice (TTS)
 
 Flow:
-1. Model calls `activateVoice` with `text` (the calming message to speak) and `voice` (speaker name)
-2. `this.env.AI.run('@cf/deepgram/aura-2-en')` generates MP3 audio
-3. Audio is base64-encoded with `btoa(audio)`
+1. Model calls `activateVoice` with `text` (the calming message to speak) and `voice` (the user's `voice_id` from `getUserDetails`)
+2. `this.env.AI.run('@cf/deepgram/aura-2-en')` generates MP3 audio — returns binary data typed as `string` but cast to `ArrayBuffer` at runtime
+3. Audio is base64-encoded: `Uint8Array` → binary string via `String.fromCharCode` → `btoa`
 4. Broadcast to frontend: `this.broadcast(JSON.stringify({ type: "voice-audio", audio: base64 }))`
 5. Frontend receives it in the `onMessage` WebSocket handler
-6. Frontend creates a data URI: `"data:audio/mp3;base64," + data.audio` and plays it with `new Audio(dataUri).play()`
-7. Frontend stores the `Audio` instance in a `useRef` so it can be paused when `voice-deactivate` arrives
+6. Frontend creates a data URI: `"data:audio/mpeg;base64," + data.audio` (note: `audio/mpeg` not `audio/mp3`) and plays it with `new Audio(uri).play()`
+7. Frontend stores the `Audio` instance in `audioRef` (a `useRef`) so it can be paused when `voice-deactivate` arrives
+8. `talking` state drives a pulsing "Voice active" indicator in the header
 
-**Frontend voice handling is not yet implemented in `app.tsx`.** The `onMessage` handler has a placeholder comment where the handler should go.
+**Known issue:** The base64 audio prefix logs correctly but playback still throws `NotSupportedError` in the browser. Likely the binary encoding on the server is still producing invalid data — needs further investigation once Cloudflare Workers AI inference is stable (currently returning intermittent `8004: Internal server error`).
 
 ---
 
@@ -143,6 +144,14 @@ Flow:
 - [x] `bookAppointment` has `needsApproval` gate
 - [x] `onStart()` creates an `agent_session` row
 - [x] System prompt fully rewritten — identity, tool reference, session startup, exercise loop, booking flow, escalation, session end
+- [x] `voice_id` added to `getUserDetails` SQL query
+- [x] `tagged_at` removed from `session_tag` seed INSERT (column doesn't exist in schema)
+- [x] `work_pressure` added to `TAGS` constant in `server.ts`
+- [x] `stopWhen: stepCountIs(10)` added to `streamText` — enables multi-step tool use
+- [x] `activateVoice` fixed: removed invalid `container: "none"` parameter, fixed base64 encoding (`Uint8Array` → binary string → `btoa`)
+- [x] Frontend `onMessage` handler implemented — plays `voice-audio` broadcasts, handles `voice-deactivate`
+- [x] `talking` state + `audioRef` added to `app.tsx`
+- [x] "Voice active" pulsing indicator added to header
 
 ---
 
@@ -153,18 +162,15 @@ Flow:
 - [ ] `getAppointments`: add `ap.id` to SELECT
 - [ ] `getAvailability`: individual path `.first()` → `.all()`
 - [ ] `logExerciseFeedback`: `=== null` → `== null` on the `exercise_id` check
-- [ ] `TAGS` constant: add `"work_pressure"` (or remove it from `prompt.ts`)
-- [ ] `getUserDetails`: SQL query does not select a voice preference — either add it to the DB/query or remove the mention from the tool description
-- [ ] Remove unused imports (`type Schedule`, `stepCountIs`)
+- [ ] Remove unused imports (`type Schedule`)
+- [ ] `activateVoice`: audio playback still broken — `NotSupportedError` in browser, binary encoding may still be producing invalid data
 
 ### Frontend (app.tsx)
-- [ ] Handle `voice-audio` broadcast: build data URI from base64, play with `new Audio()`, store instance in `useRef`, set `isVoiceActive` state to `true`
-- [ ] Handle `voice-deactivate` broadcast: call `.pause()` on the ref, clear it, set `isVoiceActive` to `false`
-- [ ] Add a visible UI indicator when voice mode is active
+- [ ] Remove debug `console.log("Audio prefix:", ...)` once audio playback is confirmed working
+- [ ] Confirm `voice-audio` playback end-to-end once Cloudflare inference is stable
 
 ### Prompt (prompt.ts)
 - [ ] Add fallback instruction for `activateVoice` `voice` parameter (default voice when no preference is available)
-- [ ] Fix `work_pressure` tag (sync with server or remove)
 
 ### Auth
 - [ ] `userId` is hardcoded as `1` in `onStart()` — needs real auth (Cloudflare Access or similar)

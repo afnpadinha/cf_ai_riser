@@ -260,11 +260,12 @@ function Chat() {
         try {
           const data = JSON.parse(String(message.data));
           if(data.type ==="voice-audio"){
+            console.log("Audio prefix:", data.audio?.substring(0, 30))
             setSpeach(true)
-            const uri = "data:audio/mp3;base64," + data.audio
+            const uri = "data:audio/mpeg;base64," + data.audio
             const audio = new Audio(uri)
             audioRef.current = audio
-            audio.play()
+            audio.play().catch(err => console.error("Audio play failed:", err))
           } else if(data.type ==="voice-deactivate") {
             setSpeach(false)
             audioRef.current?.pause()

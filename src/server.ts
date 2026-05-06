@@ -448,7 +448,9 @@ export class ChatAgent extends AIChatAgent<Env> {
               speaker: voice as Ai_Cf_Deepgram_Aura_2_En_Input["speaker"], //trust me this is avalid string speaker
               encoding: "mp3"
             })
-            const encode = btoa(audio)
+            const uint8 = new Uint8Array(audio as unknown as ArrayBuffer)
+            const binary = Array.from(uint8).map(b => String.fromCharCode(b)).join('')
+            const encode = btoa(binary)
             this.broadcast(JSON.stringify({ type: "voice-audio", audio: encode }))
           return { success: true}
           }
